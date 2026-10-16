@@ -35,6 +35,10 @@ class paperHandler:
         return out
 
 
+class ArxivUnavailableError(RuntimeError):
+    pass
+
+
 class arxiveHandler(paperHandler):
 
     def extract_ids(self, message_content):
@@ -48,6 +52,11 @@ class arxiveHandler(paperHandler):
     HEADERS = {'User-Agent': 'ZulipNotionPaperBot/1.0 (+https://github.com/anandtrex/ZulipNotionPaperBot)'}
     MAX_ATTEMPTS = 4
 
+    def __init__(self, fallback=None):
+        """fallback: optional zoteroTranslationHandler, used to look papers up when the arXiv API is unavailable."""
+        super().__init__()
+        self.fallback = fallback
+
     def query_api(self, arxiv_id):
         url = f'https://export.arxiv.org/api/query?id_list={arxiv_id}'
         last_attempt = self.MAX_ATTEMPTS - 1
@@ -56,7 +65,7 @@ class arxiveHandler(paperHandler):
                 response = requests.get(url, headers=self.HEADERS, timeout=30)
             except requests.exceptions.Timeout:
                 if attempt == last_attempt:
-                    raise RuntimeError("the arXiv API is not responding, please try again in a few minutes") from None
+                    raise ArxivUnavailableError("the arXiv API is not responding, please try again in a few minutes") from None
                 time.sleep(3 * 2 ** attempt)
                 continue
             if response.status_code not in (429, 503) or attempt == last_attempt:
@@ -65,9 +74,25 @@ class arxiveHandler(paperHandler):
             time.sleep(max(int(retry_after) if retry_after.isdigit() else 0, 3 * 2 ** attempt))
 
     def get_info(self, arxiv_id):
+        try:
+            return self.get_info_from_api(arxiv_id)
+        except ArxivUnavailableError as e:
+            if self.fallback is None:
+                raise
+            print(f"arXiv API unavailable for {arxiv_id} ({e}), falling back to the Zotero translation server")
+            try:
+                info = self.fallback.search(f"arXiv:{arxiv_id}")
+            except RuntimeError as fallback_error:
+                raise ArxivUnavailableError(f"{e} (fallback also failed: {fallback_error})") from None
+            if info:
+                info.update({"id": arxiv_id, "category": None, "github_repo": self.get_github_url(arxiv_id),
+                             "link": info.get('link') or f"http://arxiv.org/abs/{arxiv_id}"})
+            return info
+
+    def get_info_from_api(self, arxiv_id):
         response = self.query_api(arxiv_id)
         if response.status_code in (429, 503):
-            raise RuntimeError(f"the arXiv API is rate limiting requests (HTTP {response.status_code}), please try again in a few minutes")
+            raise ArxivUnavailableError(f"the arXiv API is rate limiting requests (HTTP {response.status_code}), please try again in a few minutes")
         if response.status_code != 200:
             self.log.append(response)
             return
@@ -187,14 +212,21 @@ class zoteroTranslationHandler(paperHandler):
         return list(dict.fromkeys(u for u in urls if self.is_whitelisted(u)))
 
     def get_info(self, url):
+        return self.translate('web', url)
+
+    def search(self, identifier):
+        """Looks up a DOI, ISBN, PMID or arXiv ID (e.g. 'arXiv:2609.04170')."""
+        return self.translate('search', identifier)
+
+    def translate(self, endpoint, query):
         try:
-            response = requests.post(f"{self.server_url}/web", data=url.encode('utf-8'),
+            response = requests.post(f"{self.server_url}/{endpoint}", data=query.encode('utf-8'),
                                      headers={'Content-Type': 'text/plain'}, timeout=self.timeout)
         except requests.exceptions.RequestException as e:
             print(f"Zotero translation server unavailable at {self.server_url}: {e}")
             raise RuntimeError(f"the Zotero translation server is not reachable at {self.server_url}") from None
         if response.status_code != 200:
-            # 300 = multiple items on the page, 501 = no translator for the page
+            # 300 = multiple items on the page, 501 = no translator for the page or identifier
             self.log.append(response)
             return
         items = [item for item in response.json() if item.get('itemType') in self.PAPER_ITEM_TYPES]
@@ -208,7 +240,7 @@ class zoteroTranslationHandler(paperHandler):
         year_match = re.search(r'\b(\d{4})\b', item.get('date', ''))
         info = {"title": item.get('title', ''), "authors": authors,
                 "abstract": (item.get('abstractNote') or '').replace("\n", " "),
-                "link": item.get('url') or url, "publish_date": item.get('date'),
+                "link": item.get('url') or (query if endpoint == 'web' else None), "publish_date": item.get('date'),
                 "year": int(year_match.group(1)) if year_match else None,
                 "bibtex": self.get_bibtex(item)}
         return info

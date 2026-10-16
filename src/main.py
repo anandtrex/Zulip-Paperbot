@@ -10,7 +10,8 @@ from handler_wrapper import HandlerWrapper
 import atexit
 
 if __name__ == "__main__":
-    paper_handlers = [arxiveHandler(), openreviewHandler(), zoteroTranslationHandler()]
+    translation_handler = zoteroTranslationHandler()
+    paper_handlers = [arxiveHandler(fallback=translation_handler), openreviewHandler(), translation_handler]
 
     database_handlers = [
         HandlerWrapper(
