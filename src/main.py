@@ -45,6 +45,7 @@ if __name__ == "__main__":
         api_key=ZULIP_API_KEY,
         site=ZULIP_SITE,
         paper_handlers=paper_handlers,
-        database_handlers=database_handlers
+        database_handlers=database_handlers,
+        easter_egg_reply=getattr(config, 'EASTER_EGG_REPLY', None)  # optional reply to "Guess who's back?"
     )
     zlp_handler.run()

@@ -16,9 +16,12 @@ def replace_single_dollar(s):
     return re.sub(pattern, repl, s)
 
 
+EASTER_EGG_TRIGGER = re.compile(r"^\s*guess who['’]?s back[?!.]*\s*$", re.IGNORECASE)
+
+
 class zulipHandler:
 
-    def __init__(self, email, api_key, site, paper_handlers = None, database_handlers = None):
+    def __init__(self, email, api_key, site, paper_handlers = None, database_handlers = None, easter_egg_reply = None):
         self.client = zulip.Client(email=email, api_key=api_key, site=site)
         self.email = email
         self.paper_handlers = paper_handlers
@@ -28,6 +31,9 @@ class zulipHandler:
         self.database_handlers = database_handlers
         if self.database_handlers is None:
             self.database_handlers = []
+
+        # Reply to "Guess who's back?"; disabled when not set.
+        self.easter_egg_reply = easter_egg_reply
 
     def info_to_message(self, title, authors, abstract, link, github=None):
         message = f"``` spoiler {replace_single_dollar(title)}\n- **Authors**: {', '.join(authors)}\n- **Abstract**: {replace_single_dollar(abstract)}\n- **Link**: {link}\n"
@@ -50,6 +56,10 @@ class zulipHandler:
 
     def handle_message(self, message):
         if message['sender_email'] == self.email:
+            return
+
+        if self.easter_egg_reply and EASTER_EGG_TRIGGER.match(message['content']):
+            self.send_message_to_zulip(self.easter_egg_reply, message)
             return
 
         message_filtered = self.filter_zulip_quotes(message['content'])
