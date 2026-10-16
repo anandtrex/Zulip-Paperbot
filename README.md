@@ -15,6 +15,7 @@ Zulip-Notion linking bot that saves papers (currently arxiv & openreview) and th
 ## 3. Add the Zulip site
   Save the URL of the Zulip site you want to use the bot on under `ZULIP_SITE` in the `config.py`
 ## 4. Add connection to Notion
+  Notion and Zotero are both optional: if any of a database's credentials in `config.py` are empty (or missing), that database is disabled. Zotero needs `ZOTERO_API_KEY` and `ZOTERO_GROUP_ID`.
   Go [here](https://www.notion.so/my-integrations) and add a `new integration`. Add the `Internal Integration Secret` as `NOTION_TOKEN` to the `config.py`.
   Select the workspace of the database you want to link to as the `Associated workspace`.
 ## 5. Create a database on Notion

@@ -124,7 +124,8 @@ class zulipHandler:
                         "content": update_result
                     })
 
-                threading.Thread(target=update_and_notify, args=(paper_info, message)).start()
+                if self.database_handlers:
+                    threading.Thread(target=update_and_notify, args=(paper_info, message)).start()
 
 
     def send_message_to_zulip(self, response_message, message_data):

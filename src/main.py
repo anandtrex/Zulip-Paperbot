@@ -1,36 +1,33 @@
 from zulip_handler import zulipHandler
 from database_handlers import notionHandler, zoteroHandler
 from paper_handlers import arxiveHandler, openreviewHandler, zoteroTranslationHandler
-from config import (
-    ZULIP_EMAIL, ZULIP_API_KEY, ZULIP_SITE,
-    NOTION_TOKEN, NOTION_DATABASE_ID,
-    ZOTERO_API_KEY, ZOTERO_GROUP_ID
-)
+import config
+from config import ZULIP_EMAIL, ZULIP_API_KEY, ZULIP_SITE
 from handler_wrapper import HandlerWrapper
 import atexit
+
+
+def database_handler(handler_class, **credentials):
+    """Wraps a database handler, or returns None (disabling it) if any of its credentials
+    in config.py are empty or missing. `credentials` maps init kwarg -> config variable name."""
+    values = {kwarg: getattr(config, name, None) for kwarg, name in credentials.items()}
+    missing = [credentials[kwarg] for kwarg, value in values.items() if not str(value or '').strip()]
+    if missing:
+        print(f"{handler_class.__name__} disabled: {', '.join(missing)} not set in config.py.")
+        return None
+    return HandlerWrapper(handler_class, init_kwargs=values, retry_interval=300)  # Retry every 5 minutes
 
 if __name__ == "__main__":
     translation_handler = zoteroTranslationHandler()
     paper_handlers = [arxiveHandler(fallback=translation_handler), openreviewHandler(), translation_handler]
 
     database_handlers = [
-        HandlerWrapper(
-            notionHandler,
-            init_kwargs={
-                'auth_token': NOTION_TOKEN,
-                'database_id': NOTION_DATABASE_ID
-            },
-            retry_interval=300  # Retry every 5 minutes
-        ),
-        HandlerWrapper(
-            zoteroHandler,
-            init_kwargs={
-                'group_id': ZOTERO_GROUP_ID,
-                'api_key': ZOTERO_API_KEY
-            },
-            retry_interval=300  # Retry every 5 minutes
-        ),
+        database_handler(notionHandler, auth_token='NOTION_TOKEN', database_id='NOTION_DATABASE_ID'),
+        database_handler(zoteroHandler, group_id='ZOTERO_GROUP_ID', api_key='ZOTERO_API_KEY'),
     ]
+    database_handlers = [handler for handler in database_handlers if handler is not None]
+    if not database_handlers:
+        print("Warning: no databases configured; papers will only be summarised in Zulip.")
 
     # Ensure that threads are stopped when the program exits
     def cleanup():
