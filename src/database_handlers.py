@@ -85,9 +85,25 @@ class notionHandler:
     def __init__(self, auth_token, database_id):
         self.client = Client(auth=auth_token)
         self.database_id = database_id
+        # notion-client >= 3 (Notion API 2025-09-03) removed databases.query; databases now
+        # contain data sources, which are queried via data_sources.query instead.
+        self.data_source_id = None
+        if hasattr(self.client, 'data_sources'):
+            database = self.client.databases.retrieve(database_id=database_id)
+            self.data_source_id = database['data_sources'][0]['id']
+
+    def _query(self, filter):
+        if self.data_source_id is not None:
+            return self.client.data_sources.query(data_source_id=self.data_source_id, filter=filter)
+        return self.client.databases.query(database_id=self.database_id, filter=filter)
+
+    def _parent(self):
+        if self.data_source_id is not None:
+            return {"type": "data_source_id", "data_source_id": self.data_source_id}
+        return {"database_id": self.database_id}
 
     def update_db(self, info):
-        query_response = self.client.databases.query(**{"database_id": self.database_id, "filter": {"property": "Link", "url": {"equals": info['link']}}})
+        query_response = self._query({"property": "Link", "url": {"equals": info['link']}})
         if query_response['results']:
             page_id = query_response['results'][0]['id']
             current_page = self.client.pages.retrieve(page_id=page_id)
@@ -116,7 +132,7 @@ class notionHandler:
             return f"The paper already existed in Notion from the following streams: {', '.join(f'`{s}`' for s in existing_streams)}. I updated it."
         else:
             self.client.pages.create(
-                parent={"database_id": self.database_id},
+                parent=self._parent(),
                 properties={
                     "Name": {"title": [{"text": {"content": info['title']}}]},
                     "Link": {"url": info['link']},
