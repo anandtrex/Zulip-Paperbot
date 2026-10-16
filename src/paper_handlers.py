@@ -87,19 +87,15 @@ class arxiveHandler(paperHandler):
         return official_repos
 
     def get_github_url(self, arxiv_id):
-        arxiv_id = arxiv_id.split("v")[0]
-        url = f"https://paperswithcode.com/api/v1/papers/?arxiv_id={arxiv_id}"
-        response = requests.get(url)
-        papers = response.json()
-        if response.status_code != 200:
-            self.log.append(response)
-            return 
-        if papers['results']:
-            paper_id = papers['results'][0]['id']
-            official_repos = self.get_official_repositories(paper_id)
-            if official_repos:
-                github_url = official_repos[0]['url']
-                return github_url
+        # Papers with Code shut down in 2025; use Hugging Face Papers instead.
+        try:
+            arxiv_id = arxiv_id.split("v")[0]
+            r = requests.get(f"https://huggingface.co/api/papers/{arxiv_id}", timeout=10)
+            if r.status_code == 200:
+                return r.json().get("githubRepo")
+        except Exception as e:
+            print(f"GitHub lookup failed for {arxiv_id}: {e}")
+        return None
 
 
 class openreviewHandler(paperHandler):
