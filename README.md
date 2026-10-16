@@ -1,5 +1,5 @@
 # Zulip PaperBot
-Zulip paper bot that saves papers (currently arxiv & openreview) and their info in a Notion database when their link is posted in Zulip.
+A Zulip bot that watches your channels for paper links, replies with a summary of each paper (title, authors, abstract, link and official GitHub repo), and saves it to a Notion database and/or a Zotero group library.
 
 ![Zulip](readme_images/zulip_stream.png)
 
@@ -7,36 +7,50 @@ Zulip paper bot that saves papers (currently arxiv & openreview) and their info 
 
 ![Notion](readme_images/notion_database.png)
 
+# Features
+- **Supported links**
+  - **arXiv**: `arxiv.org/abs/...` links and bare IDs such as `2401.12345` or `arXiv:2401.12345`. The official GitHub repo is looked up on Hugging Face Papers.
+  - **OpenReview**: `openreview.net/forum?id=...` and `openreview.net/pdf?id=...` links.
+  - **Other sites** (optional, via the [Zotero translation server](#5-optional-run-the-zotero-translation-server)): ACL Anthology, NeurIPS/PMLR/JMLR/CVF/AAAI/IJCAI proceedings, ACM, IEEE, Springer, Nature, Science, ScienceDirect, bioRxiv/medRxiv, PubMed, Semantic Scholar, `doi.org` links and more. The full list is `zoteroTranslationHandler.DEFAULT_DOMAINS` in `src/paper_handlers.py`.
+- **Databases** (each optional, see [Configuration](#configuration))
+  - **Notion**: adds a row per paper. If the paper is already there, it adds the new channel, sharer and comment to the existing row.
+  - **Zotero**: adds the paper to a group library, in a collection named after the channel, tagged with the sharer's name, with the Zulip message attached as a note. Papers already in the library are updated the same way.
+- **Robust lookups**: arXiv requests are retried when the API is rate limiting. If it still fails, the bot falls back to the Zotero translation server (when running). When a lookup finds nothing useful, the bot posts nothing and logs the reason instead. Lookup errors (e.g. "the arXiv API is rate limiting requests") are posted in Zulip.
+
 # Setup steps
-## 1. Download Repo:
-  Download the code of this repository to the machine you want to run the bot from
-## 2. Add a new bot on Zulip:
-  On Zulip go to the upper right corner to `Settings/Personal settings/Bots` and add a new bot. Choose bot type `Generic`. Add the `BOT EMAIL` as `ZULIP_EMAIL` in the `config.py`, and the `API KEY` under `ZULIP_API_KEY`. You can configure the name and avatar of the bot as you prefer. Then go to the Bot and `Edit bot`, then `Streams`. Now subscribe the bot to all the streams you want it to listen to.
-## 3. Add the Zulip site
-  Save the URL of the Zulip site you want to use the bot on under `ZULIP_SITE` in the `config.py`
-## 4. Add connection to Notion
-  Notion and Zotero are both optional: if any of a database's credentials in `config.py` are empty (or missing), that database is disabled. Zotero needs `ZOTERO_API_KEY` and `ZOTERO_GROUP_ID`.
-  Go [here](https://www.notion.so/my-integrations) and add a `new integration`. Add the `Internal Integration Secret` as `NOTION_TOKEN` to the `config.py`.
-  Select the workspace of the database you want to link to as the `Associated workspace`.
-## 5. Create a database on Notion
-  Create a database on Notion which must have the following columns:
-  - `Name` having the Type `Title`
-  - `URL` having the Type `URL`
-  - `Code` having the Type `URL`
-  - `Authors` having the Type `Multi-select`
-  - `Shared by` having the Type `Multi-select`
-  - `Published` having the Type `Date`
-  - `Shared` having the Type `Date`
-  - `Stream` having the Type `Multi-select`
-  - `BibTeX` having the Type `Text`
-    
-  These can be in random order and additional columns can be added.
-  The database id can be found in the url on Notion when being on the database page.
-  The url is formatted in the following way `https://www.notion.so/{chars}/{database_id}?v={chars}`. Add the `database id` to the `config.py` as `NOTION_DATABASE_ID`.
-## 6. Add the connection to the database
-  Click the three dots in the upper right on your database and then under `Add connections` add your new connection.
-## 7. (Optional) Run the Zotero translation server
-  To support papers from other sites (ACL Anthology, NeurIPS/PMLR proceedings, ACM, IEEE, Springer, Nature, bioRxiv, PubMed, DOI links, ...), run [Zotero's translation server](https://github.com/zotero/translation-server) on the same machine as the bot. It needs Node.js 22 or later.
+## 1. Download the repo
+  Download the code of this repository to the machine you want to run the bot from, and install the dependencies:
+  ```bash
+  pip install zulip notion-client pyzotero requests
+  ```
+## 2. Add a new bot on Zulip
+  On Zulip go to `Personal settings/Bots` and add a new bot of type `Generic`. You can configure the name and avatar of the bot as you prefer. Note the bot's email and API key for the [configuration](#configuration), along with the URL of your Zulip site.
+  Then go to the bot, `Edit bot`, then `Channels`, and subscribe the bot to all the channels you want it to listen to.
+## 3. (Optional) Set up Notion
+  1. Go [here](https://www.notion.so/my-integrations) and add a `new integration`, selecting the workspace of your database as the `Associated workspace`. Its `Internal Integration Secret` is your `NOTION_TOKEN`.
+  2. Create a database on Notion with the following columns (in any order; additional columns are fine):
+
+     | Column | Type |
+     |---|---|
+     | `Name` | Title |
+     | `Link` | URL |
+     | `Code` | URL |
+     | `Authors` | Text |
+     | `Published` | Number (the year) |
+     | `Shared on Zulip by` | Multi-select |
+     | `Zulip stream(s) source` | Multi-select |
+     | `Source` | Multi-select |
+     | `BibTeX` | Text |
+     | `Comments` | Text |
+
+  3. The database id is in the database's URL, `https://www.notion.so/{chars}/{database_id}?v={chars}`. That's your `NOTION_DATABASE_ID`.
+  4. Click the three dots in the upper right of the database and add your integration under `Connections`.
+## 4. (Optional) Set up Zotero
+  The bot saves papers to a Zotero **group** library.
+  1. The group ID is the number in the group's URL, `https://www.zotero.org/groups/{group_id}/...`. That's your `ZOTERO_GROUP_ID`.
+  2. Create an API key at [zotero.org/settings/keys](https://www.zotero.org/settings/keys) with read/write access to that group. That's your `ZOTERO_API_KEY`.
+## 5. (Optional) Run the Zotero translation server
+  To support papers from sites other than arXiv and OpenReview, run [Zotero's translation server](https://github.com/zotero/translation-server) on the same machine as the bot. It also serves as the fallback when the arXiv API is unavailable. It needs Node.js 22 or later.
 
   `apt install nodejs` installs an older version on Debian/Ubuntu (e.g. Node 18 on Debian 12), with which the server fails to start (`ERR_REQUIRE_ESM`). Install Node 22 from NodeSource instead, removing the distro packages first since they conflict:
   ```bash
@@ -56,9 +70,30 @@ Zulip paper bot that saves papers (currently arxiv & openreview) and their info 
   npm start
   ```
   The `--recurse-submodules` is needed, the site translators are a submodule. The bot expects the server at `http://localhost:1969`. To run it as a service that starts on boot, see [Hosting on a Google Cloud free-tier VM](#hosting-on-a-google-cloud-free-tier-vm) below.
-  The list of supported domains is `zoteroTranslationHandler.DEFAULT_DOMAINS` in `paper_handlers.py`. If the server isn't running, the bot replies that it is unreachable for those links and keeps handling arXiv and OpenReview links as usual.
-## 8. Run the bot
-  Install the dependencies with `pip install zulip notion-client pyzotero requests`, then run the bot using `python main.py` from the `src` folder.
+  If the server isn't running, the bot replies that it is unreachable for those links and keeps handling arXiv and OpenReview links as usual.
+## 6. Configure and run the bot
+  Create `src/config.py` as described in [Configuration](#configuration), then run the bot from the `src` folder:
+  ```bash
+  python main.py
+  ```
+
+# Configuration
+All settings go in `src/config.py`, which is gitignored since it holds your credentials:
+```python
+# Required
+ZULIP_EMAIL = "paperbot-bot@yourorg.zulipchat.com"
+ZULIP_API_KEY = "..."
+ZULIP_SITE = "https://yourorg.zulipchat.com"
+
+# Notion (optional): leave empty or remove to disable
+NOTION_TOKEN = "..."
+NOTION_DATABASE_ID = "..."
+
+# Zotero (optional): leave empty or remove to disable
+ZOTERO_API_KEY = "..."
+ZOTERO_GROUP_ID = "..."
+```
+A database is disabled if any of its settings is empty or missing, and the bot says so in its log at startup.
 
 # Hosting on a Google Cloud free-tier VM
 The bot only makes outgoing connections, so a small always-on VM is enough. Google Cloud's [free tier](https://cloud.google.com/free/docs/free-cloud-features#compute) includes one `e2-micro` VM per month. These steps run both the bot and the (optional) Zotero translation server on it as systemd services.
@@ -90,7 +125,7 @@ The bot only makes outgoing connections, so a small always-on VM is enough. Goog
   python3 -m venv /opt/paperbot/venv
   /opt/paperbot/venv/bin/pip install zulip notion-client pyzotero requests
   ```
-  Create `/opt/paperbot/src/config.py` with your credentials (see the setup steps above), readable only by you:
+  Create `/opt/paperbot/src/config.py` with your credentials (see [Configuration](#configuration) above), readable only by you:
   ```bash
   nano /opt/paperbot/src/config.py
   chmod 600 /opt/paperbot/src/config.py
