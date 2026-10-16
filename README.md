@@ -1,5 +1,5 @@
-# ZulipNotionPaperBot
-Zulip-Notion linking bot that saves papers (currently arxiv & openreview) and their info in a Notion database when their link is posted in Zulip.
+# Zulip PaperBot
+Zulip paper bot that saves papers (currently arxiv & openreview) and their info in a Notion database when their link is posted in Zulip.
 
 ![Zulip](readme_images/zulip_stream.png)
 
