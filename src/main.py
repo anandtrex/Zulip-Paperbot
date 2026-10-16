@@ -1,6 +1,6 @@
 from zulip_handler import zulipHandler
 from database_handlers import notionHandler, zoteroHandler
-from paper_handlers import arxiveHandler, openreviewHandler
+from paper_handlers import arxiveHandler, openreviewHandler, zoteroTranslationHandler
 from config import (
     ZULIP_EMAIL, ZULIP_API_KEY, ZULIP_SITE,
     NOTION_TOKEN, NOTION_DATABASE_ID,
@@ -10,7 +10,7 @@ from handler_wrapper import HandlerWrapper
 import atexit
 
 if __name__ == "__main__":
-    paper_handlers = [arxiveHandler(), openreviewHandler()]
+    paper_handlers = [arxiveHandler(), openreviewHandler(), zoteroTranslationHandler()]
 
     database_handlers = [
         HandlerWrapper(

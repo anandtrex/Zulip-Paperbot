@@ -34,7 +34,11 @@ Zulip-Notion linking bot that saves papers (currently arxiv & openreview) and th
   The url is formatted in the following way `https://www.notion.so/{chars}/{database_id}?v={chars}`. Add the `database id` to the `config.py` as `NOTION_DATABASE_ID`.
 ## 6. Add the connection to the database
   Click the three dots in the upper right on your database and then under `Add connections` add your new connection.
-## 7. Run the bot
+## 7. (Optional) Run the Zotero translation server
+  To support papers from other sites (ACL Anthology, NeurIPS/PMLR proceedings, ACM, IEEE, Springer, Nature, bioRxiv, PubMed, DOI links, ...), run [Zotero's translation server](https://github.com/zotero/translation-server) locally:
+  `docker run -d -p 1969:1969 --restart unless-stopped zotero/translation-server`.
+  The list of supported domains is `zoteroTranslationHandler.DEFAULT_DOMAINS` in `paper_handlers.py`. If the server isn't running, the bot replies that it is unreachable for those links and keeps handling arXiv and OpenReview links as usual.
+## 8. Run the bot
   You can run the bot using `python bot.py` from the `src` folder.
   
 

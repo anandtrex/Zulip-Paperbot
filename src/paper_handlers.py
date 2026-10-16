@@ -1,5 +1,6 @@
 import re
 import requests
+from urllib.parse import urlparse
 import xml.etree.ElementTree as ET
 from datetime import datetime
 
@@ -131,3 +132,70 @@ class openreviewHandler(paperHandler):
             bibtex = paper_info_to_bibtex(info, is_arxive=False)
             info['bibtex'] = bibtex
             return info
+
+
+class zoteroTranslationHandler(paperHandler):
+    """Fetches metadata for whitelisted sites via a Zotero translation-server
+    (https://github.com/zotero/translation-server), which runs the same site
+    translators as the Zotero Connector browser extension."""
+
+    DEFAULT_DOMAINS = [
+        'aclanthology.org', 'proceedings.neurips.cc', 'papers.nips.cc', 'proceedings.mlr.press', 'jmlr.org',
+        'openaccess.thecvf.com', 'ojs.aaai.org', 'ijcai.org', 'dl.acm.org', 'ieeexplore.ieee.org',
+        'link.springer.com', 'nature.com', 'science.org', 'sciencedirect.com', 'pnas.org', 'cell.com',
+        'elifesciences.org', 'journals.plos.org', 'frontiersin.org', 'biorxiv.org', 'medrxiv.org',
+        'pubmed.ncbi.nlm.nih.gov', 'ncbi.nlm.nih.gov', 'semanticscholar.org', 'doi.org',
+    ]
+    PAPER_ITEM_TYPES = {'journalArticle', 'conferencePaper', 'preprint', 'report', 'thesis', 'book', 'bookSection', 'manuscript'}
+
+    def __init__(self, server_url='http://localhost:1969', domains=None, timeout=30):
+        super().__init__()
+        self.server_url = server_url.rstrip('/')
+        self.domains = [d.lower() for d in (domains if domains is not None else self.DEFAULT_DOMAINS)]
+        self.timeout = timeout
+
+    def is_whitelisted(self, url):
+        host = (urlparse(url).hostname or '').lower()
+        return any(host == d or host.endswith('.' + d) for d in self.domains)
+
+    def extract_ids(self, message_content):
+        # Stop at characters that delimit URLs in markdown/text, then drop trailing punctuation.
+        urls = [u.rstrip('.,;:!?\'"') for u in re.findall(r'https?://[^\s<>()\[\]"\'`]+', message_content)]
+        return list(dict.fromkeys(u for u in urls if self.is_whitelisted(u)))
+
+    def get_info(self, url):
+        try:
+            response = requests.post(f"{self.server_url}/web", data=url.encode('utf-8'),
+                                     headers={'Content-Type': 'text/plain'}, timeout=self.timeout)
+        except requests.exceptions.RequestException as e:
+            print(f"Zotero translation server unavailable at {self.server_url}: {e}")
+            raise RuntimeError(f"the Zotero translation server is not reachable at {self.server_url}") from None
+        if response.status_code != 200:
+            # 300 = multiple items on the page, 501 = no translator for the page
+            self.log.append(response)
+            return
+        items = [item for item in response.json() if item.get('itemType') in self.PAPER_ITEM_TYPES]
+        if not items:
+            return
+        item = items[0]
+
+        creators = item.get('creators', [])
+        authors = [c for c in creators if c.get('creatorType') == 'author'] or creators
+        authors = [c.get('name') or f"{c.get('firstName', '')} {c.get('lastName', '')}".strip() for c in authors]
+        year_match = re.search(r'\b(\d{4})\b', item.get('date', ''))
+        info = {"title": item.get('title', ''), "authors": authors,
+                "abstract": (item.get('abstractNote') or '').replace("\n", " "),
+                "link": item.get('url') or url, "publish_date": item.get('date'),
+                "year": int(year_match.group(1)) if year_match else None,
+                "bibtex": self.get_bibtex(item)}
+        return info
+
+    def get_bibtex(self, item):
+        try:
+            response = requests.post(f"{self.server_url}/export", params={'format': 'bibtex'},
+                                     json=[item], timeout=self.timeout)
+            if response.status_code == 200:
+                return response.text.strip()
+        except requests.exceptions.RequestException as e:
+            print(f"BibTeX export failed: {e}")
+        return ""
