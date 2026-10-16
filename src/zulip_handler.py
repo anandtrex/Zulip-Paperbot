@@ -97,7 +97,7 @@ class zulipHandler:
                     paper_info['authors'],
                     paper_info['abstract'],
                     paper_info['link'],
-                    paper_info.get('github')
+                    paper_info.get('github_repo')
                 )
                 detailed_message = f"{message['sender_full_name']} shared:\n{detailed_info}"
                 self.client.update_message({"message_id": initial_message_id, "content": detailed_message})
