@@ -29,6 +29,12 @@ class paperHandler:
     def __init__(self):
         self.log = []
 
+    def note(self, reason, response=None):
+        """Records why no info was returned, for the bot's log."""
+        if response is not None:
+            reason += f" (HTTP {response.status_code}: {response.text[:200].strip()!r})"
+        self.log.append(reason)
+
     def flush_log(self):
         out = self.log
         self.log = []
@@ -84,6 +90,8 @@ class arxiveHandler(paperHandler):
                 info = self.fallback.search(f"arXiv:{arxiv_id}")
             except RuntimeError as fallback_error:
                 raise ArxivUnavailableError(f"{e} (fallback also failed: {fallback_error})") from None
+            finally:
+                self.log.extend(self.fallback.flush_log())
             if info:
                 info.update({"id": arxiv_id, "category": None, "github_repo": self.get_github_url(arxiv_id),
                              "link": info.get('link') or f"http://arxiv.org/abs/{arxiv_id}"})
@@ -94,11 +102,13 @@ class arxiveHandler(paperHandler):
         if response.status_code in (429, 503):
             raise ArxivUnavailableError(f"the arXiv API is rate limiting requests (HTTP {response.status_code}), please try again in a few minutes")
         if response.status_code != 200:
-            self.log.append(response)
+            self.note("arXiv API request failed", response)
             return
         root = ET.fromstring(response.content)
         entry = root.find('{http://www.w3.org/2005/Atom}entry')
-        if entry is not None:
+        if entry is None:
+            self.note(f"arXiv API returned no entry for {arxiv_id}", response)
+        else:
             title = entry.find('{http://www.w3.org/2005/Atom}title').text.strip().replace("\n", " ")
             authors = [author.find('{http://www.w3.org/2005/Atom}name').text for author in entry.findall('{http://www.w3.org/2005/Atom}author')]
             abstract = entry.find('{http://www.w3.org/2005/Atom}summary').text.strip().replace("\n", " ")
@@ -164,10 +174,12 @@ class openreviewHandler(paperHandler):
             api_url = f"https://api.openreview.net/notes?id={openreview_id}"
             response = requests.get(api_url)
             if response.status_code != 200:
-                self.log.append(response)
+                self.note("OpenReview API request failed", response)
                 return
         paper_data = response.json().get('notes', [])
-        if paper_data:
+        if not paper_data:
+            self.note(f"OpenReview API returned no notes for {openreview_id}", response)
+        else:
             paper = paper_data[0]
             title = paper['content']['title']['value'] if api2 else paper['content']['title'].replace("\n" " ")
             authors = paper['content']['authors']['value'] if api2 else paper['content']['authors']
@@ -227,10 +239,13 @@ class zoteroTranslationHandler(paperHandler):
             raise RuntimeError(f"the Zotero translation server is not reachable at {self.server_url}") from None
         if response.status_code != 200:
             # 300 = multiple items on the page, 501 = no translator for the page or identifier
-            self.log.append(response)
+            self.note(f"Zotero translation server /{endpoint} request failed for {query}", response)
             return
-        items = [item for item in response.json() if item.get('itemType') in self.PAPER_ITEM_TYPES]
+        all_items = response.json()
+        items = [item for item in all_items if item.get('itemType') in self.PAPER_ITEM_TYPES]
         if not items:
+            item_types = [item.get('itemType') for item in all_items]
+            self.note(f"Zotero translation server found no paper for {query} (item types: {item_types or 'none'})")
             return
         item = items[0]
 

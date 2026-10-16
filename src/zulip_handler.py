@@ -76,7 +76,8 @@ class zulipHandler:
                     continue
 
                 if not paper_info:
-                    print(f"No info returned for ID {paper_id}; not posting to Zulip. Details: {paper_handler.flush_log()}")
+                    details = '; '.join(paper_handler.flush_log()) or 'no details'
+                    print(f"No info returned for ID {paper_id}; not posting to Zulip. Details: {details}")
                     continue
 
                 detailed_info = self.info_to_message(

@@ -5,6 +5,7 @@ import config
 from config import ZULIP_EMAIL, ZULIP_API_KEY, ZULIP_SITE
 from handler_wrapper import HandlerWrapper
 import atexit
+import sys
 
 
 def database_handler(handler_class, **credentials):
@@ -18,6 +19,10 @@ def database_handler(handler_class, **credentials):
     return HandlerWrapper(handler_class, init_kwargs=values, retry_interval=300)  # Retry every 5 minutes
 
 if __name__ == "__main__":
+    # Under systemd stdout is not a terminal, so print() output would be block-buffered
+    # and show up in the journal late or not at all.
+    sys.stdout.reconfigure(line_buffering=True)
+
     translation_handler = zoteroTranslationHandler()
     paper_handlers = [arxiveHandler(fallback=translation_handler), openreviewHandler(), translation_handler]
 
