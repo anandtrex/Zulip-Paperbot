@@ -67,29 +67,16 @@ class zulipHandler:
         for paper_handler in self.paper_handlers:
             paper_ids = paper_handler.extract_ids(message_filtered)
             for paper_id in paper_ids:
-                # Send an initial message for this paper ID.
-                initial_feedback = (
-                    f"*Retrieving paper information...*"
-                )
-                request = {
-                    "type": message['type'],
-                    "to": message['sender_email'] if message['type'] == 'private' else message['display_recipient'],
-                    "subject": message.get('subject', ''),
-                    "content": initial_feedback
-                }
-                response = self.client.send_message(request)
-                initial_message_id = response.get('id')
-
+                # Look the paper up before posting anything, so that nothing is posted
+                # when no useful information is found.
                 try:
                     paper_info = paper_handler.get_info(paper_id)
                 except Exception as e:
-                    error_feedback = f"Failed to retrieve info for paper ID {paper_id}. Error: {e}"
-                    self.client.update_message({"message_id": initial_message_id, "content": error_feedback})
+                    self.send_message_to_zulip(f"Failed to retrieve info for paper ID {paper_id}. Error: {e}", message)
                     continue
 
                 if not paper_info:
-                    no_info_feedback = f"No info returned for ID {paper_id}."
-                    self.client.update_message({"message_id": initial_message_id, "content": no_info_feedback})
+                    print(f"No info returned for ID {paper_id}; not posting to Zulip. Details: {paper_handler.flush_log()}")
                     continue
 
                 detailed_info = self.info_to_message(
@@ -100,7 +87,7 @@ class zulipHandler:
                     paper_info.get('github_repo')
                 )
                 detailed_message = f"{message['sender_full_name']} shared:\n{detailed_info}"
-                self.client.update_message({"message_id": initial_message_id, "content": detailed_message})
+                self.send_message_to_zulip(detailed_message, message)
 
                 def update_and_notify(info, orig_message):
                     info['sender'] = orig_message['sender_full_name']
