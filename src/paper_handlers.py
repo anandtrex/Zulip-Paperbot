@@ -1,4 +1,5 @@
 import re
+import time
 import requests
 from urllib.parse import urlparse
 import xml.etree.ElementTree as ET
@@ -42,15 +43,37 @@ class arxiveHandler(paperHandler):
         arxiv_ids = [arxiv_id for match in matches for arxiv_id in match if arxiv_id]
         return arxiv_ids
 
+    # arXiv throttles anonymous clients (e.g. the default python-requests User-Agent) and asks
+    # API users to identify themselves and wait at least 3 seconds between requests.
+    HEADERS = {'User-Agent': 'ZulipNotionPaperBot/1.0 (+https://github.com/anandtrex/ZulipNotionPaperBot)'}
+    MAX_ATTEMPTS = 4
+
+    def query_api(self, arxiv_id):
+        url = f'https://export.arxiv.org/api/query?id_list={arxiv_id}'
+        last_attempt = self.MAX_ATTEMPTS - 1
+        for attempt in range(self.MAX_ATTEMPTS):
+            try:
+                response = requests.get(url, headers=self.HEADERS, timeout=30)
+            except requests.exceptions.Timeout:
+                if attempt == last_attempt:
+                    raise RuntimeError("the arXiv API is not responding, please try again in a few minutes") from None
+                time.sleep(3 * 2 ** attempt)
+                continue
+            if response.status_code not in (429, 503) or attempt == last_attempt:
+                return response
+            retry_after = response.headers.get('Retry-After', '')
+            time.sleep(max(int(retry_after) if retry_after.isdigit() else 0, 3 * 2 ** attempt))
+
     def get_info(self, arxiv_id):
-        url = f'http://export.arxiv.org/api/query?id_list={arxiv_id}'
-        response = requests.get(url)
+        response = self.query_api(arxiv_id)
+        if response.status_code in (429, 503):
+            raise RuntimeError(f"the arXiv API is rate limiting requests (HTTP {response.status_code}), please try again in a few minutes")
         if response.status_code != 200:
             self.log.append(response)
             return
         root = ET.fromstring(response.content)
         entry = root.find('{http://www.w3.org/2005/Atom}entry')
-        if entry:
+        if entry is not None:
             title = entry.find('{http://www.w3.org/2005/Atom}title').text.strip().replace("\n", " ")
             authors = [author.find('{http://www.w3.org/2005/Atom}name').text for author in entry.findall('{http://www.w3.org/2005/Atom}author')]
             abstract = entry.find('{http://www.w3.org/2005/Atom}summary').text.strip().replace("\n", " ")
