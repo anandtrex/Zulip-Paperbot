@@ -1,6 +1,6 @@
 from zulip_handler import zulipHandler
 from database_handlers import notionHandler, zoteroHandler
-from paper_handlers import arxiveHandler, openreviewHandler, zoteroTranslationHandler
+from paper_handlers import arxiveHandler, openreviewHandler, zoteroTranslationHandler, ieeeHandler
 import config
 from config import ZULIP_EMAIL, ZULIP_API_KEY, ZULIP_SITE
 from handler_wrapper import HandlerWrapper
@@ -23,8 +23,17 @@ if __name__ == "__main__":
     # and show up in the journal late or not at all.
     sys.stdout.reconfigure(line_buffering=True)
 
-    translation_handler = zoteroTranslationHandler()
-    paper_handlers = [arxiveHandler(fallback=translation_handler), openreviewHandler(), translation_handler]
+    paper_handlers = []
+    translation_domains = zoteroTranslationHandler.DEFAULT_DOMAINS
+    ieee_api_key = str(getattr(config, 'IEEE_API_KEY', None) or '').strip()
+    if ieee_api_key:
+        paper_handlers.append(ieeeHandler(ieee_api_key))
+        # IEEE links are handled by ieeeHandler, so don't also send them to the translation server.
+        translation_domains = [d for d in translation_domains if d != 'ieeexplore.ieee.org']
+    else:
+        print("ieeeHandler disabled: IEEE_API_KEY not set in config.py.")
+    translation_handler = zoteroTranslationHandler(domains=translation_domains)
+    paper_handlers += [arxiveHandler(fallback=translation_handler), openreviewHandler(), translation_handler]
 
     database_handlers = [
         database_handler(notionHandler, auth_token='NOTION_TOKEN', database_id='NOTION_DATABASE_ID'),

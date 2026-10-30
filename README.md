@@ -11,6 +11,7 @@ A Zulip bot that watches your channels for paper links, replies with a summary o
 - **Supported links**
   - **arXiv**: `arxiv.org/abs/...` links and bare IDs such as `2401.12345` or `arXiv:2401.12345`. The official GitHub repo is looked up on Hugging Face Papers.
   - **OpenReview**: `openreview.net/forum?id=...` and `openreview.net/pdf?id=...` links.
+  - **IEEE Xplore** (optional): `ieeexplore.ieee.org/document/...` links, via the IEEE Xplore Metadata Search API. IEEE blocks automated access to its pages, so this needs a free API key from [developer.ieee.org](https://developer.ieee.org); see [Configuration](#configuration).
   - **Other sites** (optional, via the [Zotero translation server](#5-optional-run-the-zotero-translation-server)): ACL Anthology, NeurIPS/PMLR/JMLR/CVF/AAAI/IJCAI proceedings, ACM, IEEE, Springer, Nature, Science, Cell, ScienceDirect, JNeurosci, bioRxiv/medRxiv, PubMed, Semantic Scholar, `doi.org` links and more. The full list is `zoteroTranslationHandler.DEFAULT_DOMAINS` in `src/paper_handlers.py`.
 - **Databases** (each optional, see [Configuration](#configuration))
   - **Notion**: adds a row per paper. If the paper is already there, it adds the new channel, sharer and comment to the existing row.
@@ -92,8 +93,11 @@ NOTION_DATABASE_ID = "..."
 # Zotero (optional): leave empty or remove to disable
 ZOTERO_API_KEY = "..."
 ZOTERO_GROUP_ID = "..."
+
+# IEEE Xplore (optional): key for the "IEEE Xplore: Metadata Search" API from developer.ieee.org
+IEEE_API_KEY = "..."
 ```
-A database is disabled if any of its settings is empty or missing, and the bot says so in its log at startup.
+A database (or IEEE support) is disabled if any of its settings is empty or missing, and the bot says so in its log at startup.
 
 # Hosting on a Google Cloud free-tier VM
 The bot only makes outgoing connections, so a small always-on VM is enough. Google Cloud's [free tier](https://cloud.google.com/free/docs/free-cloud-features#compute) includes one `e2-micro` VM per month. These steps run both the bot and the (optional) Zotero translation server on it as systemd services.
@@ -138,6 +142,7 @@ The bot only makes outgoing connections, so a small always-on VM is enough. Goog
   NOTION_DATABASE_ID = "..."
   ZOTERO_API_KEY = "..."       # leave empty to disable Zotero
   ZOTERO_GROUP_ID = "..."
+  IEEE_API_KEY = "..."         # optional, leave empty to disable IEEE links
   ```
 
 ## 4. (Optional) Install the Zotero translation server

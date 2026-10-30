@@ -247,10 +247,13 @@ class zoteroTranslationHandler(paperHandler):
         return self.translate('web', url)
 
     def find_doi(self, url):
+        host = (urlparse(url).hostname or '').lower()
+        if host in ('doi.org', 'dx.doi.org'):
+            doi = unquote(urlparse(url).path).lstrip('/')
+            return doi if doi.startswith('10.') else None
         pii = self.find_pii(url)
         if pii:
             return self.pii_to_doi(pii)
-        host = (urlparse(url).hostname or '').lower()
         issn = next((issn for d, issn in self.HIGHWIRE_JOURNALS.items() if host == d or host.endswith('.' + d)), None)
         match = self.HIGHWIRE_PATH.search(urlparse(url).path)
         if issn and match:
@@ -334,4 +337,53 @@ class zoteroTranslationHandler(paperHandler):
                 return response.text.strip()
         except requests.exceptions.RequestException as e:
             print(f"BibTeX export failed: {e}")
+        return ""
+
+
+class ieeeHandler(paperHandler):
+    """Fetches metadata for IEEE Xplore links via the IEEE Xplore Metadata API (https://developer.ieee.org),
+    which needs an API key. IEEE Xplore pages themselves block automated requests."""
+
+    def __init__(self, api_key, timeout=30):
+        super().__init__()
+        self.api_key = api_key
+        self.timeout = timeout
+
+    def extract_ids(self, message_content):
+        # e.g. ieeexplore.ieee.org/document/10416736, .../abstract/document/10416736, .../stamp/stamp.jsp?arnumber=10416736
+        article_numbers = re.findall(r'https?://ieeexplore\.ieee\.org/[^\s<>()\[\]]*?(?:document/|arnumber=)(\d+)', message_content)
+        return list(dict.fromkeys(article_numbers))
+
+    def get_info(self, article_number):
+        try:
+            response = requests.get('https://ieeexploreapi.ieee.org/api/v1/search/articles', headers=HEADERS, timeout=self.timeout,
+                                    params={'apikey': self.api_key, 'article_number': article_number, 'format': 'json'})
+        except requests.exceptions.RequestException as e:
+            raise RuntimeError(f"the IEEE Xplore API is not reachable: {e}") from None
+        if response.status_code != 200:
+            # Don't log the request URL, it contains the API key.
+            self.note(f"IEEE Xplore API request for article {article_number} failed", response)
+            return
+        articles = response.json().get('articles', [])
+        if not articles:
+            self.note(f"IEEE Xplore API returned no article {article_number}", response)
+            return
+        article = articles[0]
+        authors = [a.get('full_name', '') for a in article.get('authors', {}).get('authors', [])]
+        year = article.get('publication_year')
+        doi = article.get('doi')
+        return {"title": article.get('title', ''), "authors": authors,
+                "abstract": (article.get('abstract') or '').replace("\n", " "),
+                "link": f"https://ieeexplore.ieee.org/document/{article_number}", "publish_date": year,
+                "year": int(year) if str(year or '').isdigit() else None,
+                "bibtex": self.get_bibtex(doi) if doi else ""}
+
+    def get_bibtex(self, doi):
+        # doi.org returns BibTeX via content negotiation (served by Crossref, so not blocked like IEEE Xplore).
+        try:
+            response = requests.get(f"https://doi.org/{doi}", headers={**HEADERS, 'Accept': 'application/x-bibtex'}, timeout=self.timeout)
+            if response.status_code == 200:
+                return response.text.strip()
+        except requests.exceptions.RequestException as e:
+            print(f"BibTeX lookup for {doi} failed: {e}")
         return ""
