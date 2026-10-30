@@ -209,6 +209,9 @@ class zoteroTranslationHandler(paperHandler):
         'pubmed.ncbi.nlm.nih.gov', 'ncbi.nlm.nih.gov', 'semanticscholar.org', 'doi.org', 'jneurosci.org',
     ]
     # Elsevier article ID, e.g. S0896-6273(24)00001-5 in cell.com URLs or S0896627324000015 in sciencedirect.com URLs.
+    # Journals with HighWire-style article URLs (/content/<volume>/<issue>/<first page>), by ISSN.
+    HIGHWIRE_JOURNALS = {'jneurosci.org': '0270-6474'}
+    HIGHWIRE_PATH = re.compile(r'/content/(\d+)/\d+/(e?\d+)')
     ELSEVIER_PII = re.compile(r'S\d{4}-?\d{3}[\dX]\(?\d{2}\)?\d{5}-?[\dX]', re.IGNORECASE)
     PAPER_ITEM_TYPES = {'journalArticle', 'conferencePaper', 'preprint', 'report', 'thesis', 'book', 'bookSection', 'manuscript'}
 
@@ -232,10 +235,10 @@ class zoteroTranslationHandler(paperHandler):
         return list(dict.fromkeys(u for u in urls if self.is_whitelisted(u)))
 
     def get_info(self, url):
-        # Elsevier sites (cell.com, sciencedirect.com) block the translation server with a Cloudflare
-        # challenge, so look their papers up by DOI instead, which the translation server resolves via Crossref.
-        pii = self.find_pii(url)
-        doi = self.pii_to_doi(pii) if pii else None
+        # Some publishers (cell.com, sciencedirect.com, jneurosci.org) block the translation server with a
+        # Cloudflare challenge, so look their papers up by DOI instead, which the translation server resolves
+        # via Crossref.
+        doi = self.find_doi(url)
         if doi:
             info = self.search(doi)
             if info:
@@ -243,25 +246,51 @@ class zoteroTranslationHandler(paperHandler):
                 return info
         return self.translate('web', url)
 
+    def find_doi(self, url):
+        pii = self.find_pii(url)
+        if pii:
+            return self.pii_to_doi(pii)
+        host = (urlparse(url).hostname or '').lower()
+        issn = next((issn for d, issn in self.HIGHWIRE_JOURNALS.items() if host == d or host.endswith('.' + d)), None)
+        match = self.HIGHWIRE_PATH.search(urlparse(url).path)
+        if issn and match:
+            return self.citation_to_doi(issn, *match.groups())
+        return None
+
     def find_pii(self, url):
         match = self.ELSEVIER_PII.search(unquote(url))
         return re.sub(r'[-()]', '', match.group(0)).upper() if match else None
 
     def pii_to_doi(self, pii):
+        items = self.query_crossref(f"Elsevier PII {pii}", {'filter': f'alternative-id:{pii}', 'select': 'DOI', 'rows': 1})
+        return items[0]['DOI'] if items else None
+
+    def citation_to_doi(self, issn, volume, first_page):
+        description = f"ISSN {issn} volume {volume} page {first_page}"
+        items = self.query_crossref(description, {'query.bibliographic': f"{volume} {first_page}", 'filter': f'issn:{issn}',
+                                                  'select': 'DOI,volume,page', 'rows': 5})
+        # The search is fuzzy, so only accept an exact volume and first-page match.
+        for item in items or []:
+            if item.get('volume') == volume and item.get('page', '').split('-')[0].lower() == first_page.lower():
+                return item['DOI']
+        if items:
+            self.note(f"Crossref has no exact match for {description}")
+        return None
+
+    def query_crossref(self, description, params):
+        """Returns the matching Crossref works, or None (with a note on why) if there are none."""
         try:
-            response = requests.get('https://api.crossref.org/works', headers=HEADERS, timeout=self.timeout,
-                                    params={'filter': f'alternative-id:{pii}', 'select': 'DOI', 'rows': 1})
+            response = requests.get('https://api.crossref.org/works', headers=HEADERS, timeout=self.timeout, params=params)
             if response.status_code != 200:
-                self.note(f"Crossref lookup of Elsevier PII {pii} failed", response)
+                self.note(f"Crossref lookup of {description} failed", response)
                 return None
             items = response.json()['message']['items']
         except (requests.exceptions.RequestException, ValueError, KeyError) as e:
-            self.note(f"Crossref lookup of Elsevier PII {pii} failed: {e}")
+            self.note(f"Crossref lookup of {description} failed: {e}")
             return None
         if not items:
-            self.note(f"Crossref has no DOI for Elsevier PII {pii}", response)
-            return None
-        return items[0]['DOI']
+            self.note(f"Crossref has no DOI for {description}", response)
+        return items
 
     def search(self, identifier):
         """Looks up a DOI, ISBN, PMID or arXiv ID (e.g. 'arXiv:2609.04170')."""
