@@ -11,7 +11,7 @@ A Zulip bot that watches your channels for paper links, replies with a summary o
 - **Supported links**
   - **arXiv**: `arxiv.org/abs/...` links and bare IDs such as `2401.12345` or `arXiv:2401.12345`. The official GitHub repo is looked up on Hugging Face Papers.
   - **OpenReview**: `openreview.net/forum?id=...` and `openreview.net/pdf?id=...` links.
-  - **Other sites** (optional, via the [Zotero translation server](#5-optional-run-the-zotero-translation-server)): ACL Anthology, NeurIPS/PMLR/JMLR/CVF/AAAI/IJCAI proceedings, ACM, IEEE, Springer, Nature, Science, ScienceDirect, bioRxiv/medRxiv, PubMed, Semantic Scholar, `doi.org` links and more. The full list is `zoteroTranslationHandler.DEFAULT_DOMAINS` in `src/paper_handlers.py`.
+  - **Other sites** (optional, via the [Zotero translation server](#5-optional-run-the-zotero-translation-server)): ACL Anthology, NeurIPS/PMLR/JMLR/CVF/AAAI/IJCAI proceedings, ACM, IEEE, Springer, Nature, Science, Cell, ScienceDirect, JNeurosci, bioRxiv/medRxiv, PubMed, Semantic Scholar, `doi.org` links and more. The full list is `zoteroTranslationHandler.DEFAULT_DOMAINS` in `src/paper_handlers.py`.
 - **Databases** (each optional, see [Configuration](#configuration))
   - **Notion**: adds a row per paper. If the paper is already there, it adds the new channel, sharer and comment to the existing row.
   - **Zotero**: adds the paper to a group library, in a collection named after the channel, tagged with the sharer's name, with the Zulip message attached as a note. Papers already in the library are updated the same way.

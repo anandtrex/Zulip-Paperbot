@@ -1,7 +1,7 @@
 import re
 import time
 import requests
-from urllib.parse import urlparse
+from urllib.parse import urlparse, unquote
 import xml.etree.ElementTree as ET
 from datetime import datetime
 
@@ -22,6 +22,10 @@ def paper_info_to_bibtex(paper_info, is_arxive=False):
     else:
         add = "\n"
     return bib + add + "}" 
+
+
+# arXiv and Crossref ask API clients to identify themselves; anonymous clients get throttled first.
+HEADERS = {'User-Agent': 'ZulipNotionPaperBot/1.0 (+https://github.com/anandtrex/ZulipNotionPaperBot)'}
 
 
 class paperHandler:
@@ -53,9 +57,7 @@ class arxiveHandler(paperHandler):
         arxiv_ids = [arxiv_id for match in matches for arxiv_id in match if arxiv_id]
         return arxiv_ids
 
-    # arXiv throttles anonymous clients (e.g. the default python-requests User-Agent) and asks
-    # API users to identify themselves and wait at least 3 seconds between requests.
-    HEADERS = {'User-Agent': 'ZulipNotionPaperBot/1.0 (+https://github.com/anandtrex/ZulipNotionPaperBot)'}
+    # arXiv asks API users to wait at least 3 seconds between requests.
     MAX_ATTEMPTS = 4
 
     def __init__(self, fallback=None):
@@ -68,7 +70,7 @@ class arxiveHandler(paperHandler):
         last_attempt = self.MAX_ATTEMPTS - 1
         for attempt in range(self.MAX_ATTEMPTS):
             try:
-                response = requests.get(url, headers=self.HEADERS, timeout=30)
+                response = requests.get(url, headers=HEADERS, timeout=30)
             except requests.exceptions.Timeout:
                 if attempt == last_attempt:
                     raise ArxivUnavailableError("the arXiv API is not responding, please try again in a few minutes") from None
@@ -204,8 +206,10 @@ class zoteroTranslationHandler(paperHandler):
         'openaccess.thecvf.com', 'ojs.aaai.org', 'ijcai.org', 'dl.acm.org', 'ieeexplore.ieee.org',
         'link.springer.com', 'nature.com', 'science.org', 'sciencedirect.com', 'pnas.org', 'cell.com',
         'elifesciences.org', 'journals.plos.org', 'frontiersin.org', 'biorxiv.org', 'medrxiv.org',
-        'pubmed.ncbi.nlm.nih.gov', 'ncbi.nlm.nih.gov', 'semanticscholar.org', 'doi.org',
+        'pubmed.ncbi.nlm.nih.gov', 'ncbi.nlm.nih.gov', 'semanticscholar.org', 'doi.org', 'jneurosci.org',
     ]
+    # Elsevier article ID, e.g. S0896-6273(24)00001-5 in cell.com URLs or S0896627324000015 in sciencedirect.com URLs.
+    ELSEVIER_PII = re.compile(r'S\d{4}-?\d{3}[\dX]\(?\d{2}\)?\d{5}-?[\dX]', re.IGNORECASE)
     PAPER_ITEM_TYPES = {'journalArticle', 'conferencePaper', 'preprint', 'report', 'thesis', 'book', 'bookSection', 'manuscript'}
 
     def __init__(self, server_url='http://localhost:1969', domains=None, timeout=30):
@@ -219,12 +223,45 @@ class zoteroTranslationHandler(paperHandler):
         return any(host == d or host.endswith('.' + d) for d in self.domains)
 
     def extract_ids(self, message_content):
-        # Stop at characters that delimit URLs in markdown/text, then drop trailing punctuation.
-        urls = [u.rstrip('.,;:!?\'"') for u in re.findall(r'https?://[^\s<>()\[\]"\'`]+', message_content)]
+        # Stop at characters that delimit URLs in markdown/text, then drop trailing punctuation. Balanced
+        # parentheses are kept, as in cell.com URLs (S0896-6273(24)00001-5), so that the ")" closing a
+        # markdown [text](url) link still ends the URL.
+        url_char = r'[^\s<>()\[\]"\'`]'
+        urls = re.findall(rf'https?://(?:{url_char}|\({url_char}*\))+', message_content)
+        urls = [u.rstrip('.,;:!?\'"') for u in urls]
         return list(dict.fromkeys(u for u in urls if self.is_whitelisted(u)))
 
     def get_info(self, url):
+        # Elsevier sites (cell.com, sciencedirect.com) block the translation server with a Cloudflare
+        # challenge, so look their papers up by DOI instead, which the translation server resolves via Crossref.
+        pii = self.find_pii(url)
+        doi = self.pii_to_doi(pii) if pii else None
+        if doi:
+            info = self.search(doi)
+            if info:
+                info['link'] = url
+                return info
         return self.translate('web', url)
+
+    def find_pii(self, url):
+        match = self.ELSEVIER_PII.search(unquote(url))
+        return re.sub(r'[-()]', '', match.group(0)).upper() if match else None
+
+    def pii_to_doi(self, pii):
+        try:
+            response = requests.get('https://api.crossref.org/works', headers=HEADERS, timeout=self.timeout,
+                                    params={'filter': f'alternative-id:{pii}', 'select': 'DOI', 'rows': 1})
+            if response.status_code != 200:
+                self.note(f"Crossref lookup of Elsevier PII {pii} failed", response)
+                return None
+            items = response.json()['message']['items']
+        except (requests.exceptions.RequestException, ValueError, KeyError) as e:
+            self.note(f"Crossref lookup of Elsevier PII {pii} failed: {e}")
+            return None
+        if not items:
+            self.note(f"Crossref has no DOI for Elsevier PII {pii}", response)
+            return None
+        return items[0]['DOI']
 
     def search(self, identifier):
         """Looks up a DOI, ISBN, PMID or arXiv ID (e.g. 'arXiv:2609.04170')."""
